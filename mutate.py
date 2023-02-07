@@ -40,21 +40,50 @@ parser.add_argument(
     required=False,
     help="Radius to determine which neighbor side chains are re-packed",
 )
+parser.add_argument(
+    "--scan",
+    action="store_true",
+    default=False,
+    required=False,
+    help="Perform point mutation scanning (i.e. all possible mutations)",
+)
 
 args = parser.parse_args()
 
 # initialize rosetta
 init()
 
+all_aa = sorted(
+    [
+        "A",
+        "C",
+        "R",
+        "N",
+        "D",
+        "E",
+        "Q",
+        "G",
+        "H",
+        "I",
+        "L",
+        "K",
+        "M",
+        "F",
+        "P",
+        "S",
+        "T",
+        "W",
+        "Y",
+        "V",
+    ]
+)
+
 
 def define_mutation(pose, pdb_mutant_position, mutant_aa, chain="A"):
     # translate canonical numbering (PDB) to pose (shorter)
-    pose_mutant_position = pose.pdb_info().pdb2pose(chain, 600)
-    wildtype_aa = pose.residue(524).name1()
-    if wildtype_aa == mutant_aa:
-        print("Mutated amino acid is the same as wild type, please check")
+    pose_mutant_position = pose.pdb_info().pdb2pose(chain, pdb_mutant_position)
+    wildtype_aa = pose.residue(pose_mutant_position).name1()
     mutation = wildtype_aa + str(pdb_mutant_position) + mutant_aa
-    print(f"Introducing mutation {mutation}")
     return pose_mutant_position, mutation
 
 
@@ -63,6 +92,8 @@ wt_structure = Path(args.wt_structure)
 basePose = pose_from_pdb(str(wt_structure))
 
 relaxed_wt_structure = wt_structure.parent / (wt_structure.stem + "_relaxed.pdb")
+logfile = open(wt_structure.parent / "log.txt", "w")
+logfile.write("mutation, WT energy, relaxed WT energy, mutant energy, energy change, RMSD\n")
 
 # load default full-atom scoring function
 scorefxn = get_fa_scorefxn()
@@ -87,32 +118,37 @@ else:
 # Load the relaxed pose and make a copy to mutate
 relaxPose = pose_from_pdb(str(relaxed_wt_structure))
 
-
+if args.scan:
+    aa_list = all_aa
+else:
+    aa_list = [args.mutant_aa]
 # define mutation position in the pose  (different from PDB!) and out file
-pose_mutant_position, mutation = define_mutation(
-    relaxPose, args.mutant_position, args.mutant_aa
-)
-mutated_structure = relaxed_wt_structure.parent / (
-    relaxed_wt_structure.stem + f"_{mutation}.pdb"
-)
+mutation_list = []
+for aa in aa_list:
 
-# make a copy of the relaxed pose and introduce the mutation
-mutatedPose = relaxPose.clone()
-mutate_residue(
-    mutatedPose,
-    mutant_position=pose_mutant_position,
-    mutant_aa=args.mutant_aa,
-    pack_radius=args.pack_radius,
-    pack_scorefxn=scorefxn,
-)
-# write out mutated structure
-mutatedPose.dump_pdb(str(mutated_structure))
+    pose_mutant_position, mutation = define_mutation(
+        relaxPose, args.mutant_position, aa
+    )
+    mutated_structure = relaxed_wt_structure.parent / (
+        relaxed_wt_structure.stem + f"_{mutation}.pdb"
+    )
+    mutation_list.append((pose_mutant_position, mutation, mutated_structure))
 
-# report
-print(
-    f"Original structure energy: {scorefxn(basePose):.3f}",
-    f"Relaxed structure energy: {scorefxn(relaxPose):.3f}",
-    f"Mutated structure energy: {scorefxn(mutatedPose):.3f}",
-    f"RMSD wild type-mutant: {all_atom_rmsd(relaxPose, mutatedPose):.3f}",
-    sep="\n",
-)
+for mutation in mutation_list:
+    pose_mutant_position, mutation, mutated_structure = mutation
+    # make a copy of the relaxed pose and introduce the mutation
+    mutatedPose = relaxPose.clone()
+    mutate_residue(
+        mutatedPose,
+        mutant_position=pose_mutant_position,
+        mutant_aa=args.mutant_aa,
+        pack_radius=args.pack_radius,
+        pack_scorefxn=scorefxn,
+    )
+    # write out mutated structure
+    mutatedPose.dump_pdb(str(mutated_structure))
+
+    # report
+    logfile.write(
+        f"{mutation}, {scorefxn(basePose):.3f}, {scorefxn(relaxPose):.3f}, {scorefxn(mutatedPose):.3f}, {scorefxn(mutatedPose) - scorefxn(relaxPose):.3f}, {all_atom_rmsd(relaxPose, mutatedPose):.3f}\n"
+    )
