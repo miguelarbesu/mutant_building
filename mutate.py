@@ -9,8 +9,10 @@ import argparse
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
-    "--wt_structure", type=str, help="Path to the wild type structure to mutate",
-    default="data/AF2-trimmed/AF-P15056-F1-model_v3_trimmed.pdb"
+    "--wt_structure",
+    type=str,
+    help="Path to the wild type structure to mutate",
+    default="data/AF2-trimmed/AF-P15056-F1-model_v3_trimmed.pdb",
 )
 parser.add_argument(
     "--chain",
@@ -20,12 +22,16 @@ parser.add_argument(
     help="Chain to mutate. Defaults to A -- the only in AF2 predictions",
 )
 parser.add_argument(
-    "--mutant_position", type=int, help="Position to mutate in the canonical sequence",
-    default=600
+    "--mutant_position",
+    type=int,
+    help="Position to mutate in the canonical sequence",
+    default=600,
 )
 parser.add_argument(
-    "--mutant_aa", type=str, help="Amino acid to introduce in 1-letter code", 
-    default="E"
+    "--mutant_aa",
+    type=str,
+    help="Amino acid to introduce in 1-letter code",
+    default="E",
 )
 parser.add_argument(
     "--pack_radius",
@@ -39,6 +45,18 @@ args = parser.parse_args()
 
 # initialize rosetta
 init()
+
+
+def define_mutation(pose, pdb_mutant_position, mutant_aa, chain="A"):
+    # translate canonical numbering (PDB) to pose (shorter)
+    pose_mutant_position = pose.pdb_info().pdb2pose(chain, 600)
+    wildtype_aa = pose.residue(524).name1()
+    if wildtype_aa == mutant_aa:
+        print("Mutated amino acid is the same as wild type, please check")
+    mutation = wildtype_aa + str(pdb_mutant_position) + mutant_aa
+    print(f"Introducing mutation {mutation}")
+    return pose_mutant_position, mutation
+
 
 # load wilt type pdb
 wt_structure = Path(args.wt_structure)
@@ -54,25 +72,20 @@ scorefxn = get_fa_scorefxn()
 relax = rosetta.protocols.relax.FastRelax()
 relax.set_scorefxn(scorefxn)
 relax.constrain_relax_to_start_coords(True)
-# limit number of iterations for less resource usage
-# relax.max_iter(100)
-relax.apply(basePose)
-# write the relaxed structure
-basePose.dump_pdb(str(relaxed_wt_structure))
 
-# Load the previously-relaxed pose and make a copy to mutate
+# check if relaxed structure exists, otherwise create it
+# with this we avoid re-ŕunning a the bottleneck
+if not relaxed_wt_structure.exists():
+    print("Relaxing WT structure...\n")
+    # limit number of iterations for less resource usage
+    # relax.max_iter(100)
+    relax.apply(basePose)
+    # write the relaxed structure
+    basePose.dump_pdb(str(relaxed_wt_structure))
+else:
+    print("Relaxed WT structure available\n")
+# Load the relaxed pose and make a copy to mutate
 relaxPose = pose_from_pdb(str(relaxed_wt_structure))
-
-
-def define_mutation(pose, pdb_mutant_position, mutant_aa, chain="A"):
-    # translate canonical numbering (PDB) to pose (shorter)
-    pose_mutant_position = pose.pdb_info().pdb2pose(chain, 600)
-    wildtype_aa = pose.residue(524).name1()
-    if wildtype_aa == mutant_aa:
-        print("Mutated amino acid is the same as wild type, please check")
-    mutation = wildtype_aa + str(pdb_mutant_position) + mutant_aa
-    print(f"Introducing mutation {mutation}")
-    return pose_mutant_position, mutation
 
 
 # define mutation position in the pose  (different from PDB!) and out file
